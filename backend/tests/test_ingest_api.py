@@ -42,7 +42,7 @@ def client(monkeypatch):
 
     # seed a project and a fake gateway
     db = TestSession()
-    db.add(Project(id=1, key="SCRUM", name="DeliveryEnterprise"))
+    db.add(Project(id=1, organization_id=1, key="SCRUM", name="DeliveryEnterprise"))
     db.commit()
     db.close()
 

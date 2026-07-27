@@ -16,7 +16,7 @@ PULL = {
 
 
 def _project(session) -> Project:
-    project = Project(key="SCRUM", name="DeliveryEnterprise")
+    project = Project(organization_id=1, key="SCRUM", name="DeliveryEnterprise")
     session.add(project)
     session.commit()
     return project
