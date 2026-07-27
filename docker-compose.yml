@@ -1,0 +1,69 @@
+name: delivery-enterprise-platform
+
+# Local/dev stack: Postgres (with pgvector), Redis, and the FastAPI backend.
+# 12-factor config: no secrets committed here. All variables below come
+# from a root `.env` file (gitignored) that you create by copying
+# `.env.example` -> `.env`. Backend-specific variables are documented in
+# backend/.env.example; the same variable names are read here too so a
+# single `.env` at the repo root drives both `docker compose up` and a
+# locally-run `uvicorn app.main:app`.
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-delivery}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-delivery}
+      POSTGRES_DB: ${POSTGRES_DB:-delivery}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init-extensions.sql:/docker-entrypoint-initdb.d/init-extensions.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-delivery} -d ${POSTGRES_DB:-delivery}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://delivery:delivery@db:5432/delivery}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      JIRA_BASE_URL: ${JIRA_BASE_URL:-}
+      JIRA_EMAIL: ${JIRA_EMAIL:-}
+      JIRA_TOKEN: ${JIRA_TOKEN:-}
+      JIRA_STORY_POINTS_FIELD: ${JIRA_STORY_POINTS_FIELD:-customfield_10016}
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  pgdata:

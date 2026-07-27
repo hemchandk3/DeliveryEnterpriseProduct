@@ -1,0 +1,102 @@
+name: CI
+
+# Quality + security gates for the Techwave Delivery Intelligence platform,
+# per docs/ENGINEERING_STANDARDS.md #3 (Definition of Done). This workflow
+# targets backend/ (FastAPI, PR #1 layout: pyproject.toml + app/ + tests/).
+# Frontend jobs will be added here by the frontend agent when that stack
+# lands, following the same pattern.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+  # Hard merge gate per docs/ENGINEERING_STANDARDS.md: unit-test coverage >= 80%.
+  COVERAGE_FAIL_UNDER: "80"
+
+jobs:
+  backend-quality-gates:
+    name: Backend - ruff, mypy, pytest (coverage >= 80%)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install backend package + dev/type-check deps
+        # mypy isn't yet in backend/pyproject.toml's `dev` extra (PR #1
+        # ships ruff/pytest/coverage only) - installed directly here so CI
+        # doesn't block on that being added first. Safe to fold into the
+        # `dev` extra later; this step keeps working either way.
+        run: pip install -e ".[dev]" mypy
+
+      - name: Ruff lint
+        run: ruff check .
+
+      - name: Ruff format check
+        run: ruff format --check .
+
+      - name: Mypy type check
+        run: mypy --config-file mypy.ini
+
+      - name: Pytest with coverage gate
+        run: |
+          coverage run -m pytest
+          coverage xml
+          coverage report -m --fail-under="${COVERAGE_FAIL_UNDER}"
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage-report
+          path: backend/coverage.xml
+          retention-days: 14
+
+  security-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Locate security baseline config
+        id: cfg
+        # If the security agent's gitleaks baseline (.gitleaks.toml at repo
+        # root) exists, use it. Otherwise fall back to gitleaks' default
+        # ruleset so this gate is never a no-op placeholder - it always
+        # scans, it just gets stricter once the baseline lands.
+        run: |
+          if [ -f .gitleaks.toml ]; then
+            echo "Using repo .gitleaks.toml security baseline"
+            echo "args=--config=/repo/.gitleaks.toml" >> "$GITHUB_OUTPUT"
+          else
+            echo "No .gitleaks.toml found yet - using gitleaks default ruleset"
+            echo "args=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run gitleaks
+        # Scans full git history (fetch-depth: 0 above) so secrets that were
+        # committed and later removed are still caught, not just the
+        # current working tree.
+        run: |
+          docker run --rm -v "${{ github.workspace }}:/repo" zricethezav/gitleaks:latest \
+            detect --source=/repo --redact -v ${{ steps.cfg.outputs.args }}
