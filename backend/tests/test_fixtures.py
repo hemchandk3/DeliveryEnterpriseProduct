@@ -54,25 +54,25 @@ def test_ingesting_the_demo_fixture_persists_scrum_42_evidence(session):
         reviews=demo.PR_REVIEWS,
         requested_reviewers=demo.PR_REQUESTED_REVIEWERS,
     )
-    service.run(project, GitHubConnector(github_gateway), demo.REPO)
-
     jira_gateway = FakeJiraGateway(issues=demo.ISSUES, sprints=demo.SPRINTS)
-    service.run(project, JiraConnector(jira_gateway), demo.PROJECT_KEY)
+
+    github_written = service.run(project, GitHubConnector(github_gateway), demo.REPO)
+    jira_written = service.run(project, JiraConnector(jira_gateway), demo.PROJECT_KEY)
+
+    assert github_written == len(demo.PULL_REQUESTS) + len(demo.COMMITS)
+    assert jira_written == len(demo.ISSUES) + len(demo.SPRINTS)
 
     from app.models import Signal
 
     scrum_42 = (
         session.query(Signal)
-        .filter(Signal.external_id == "SCRUM-42", Signal.kind == "issue")
+        .filter_by(source="jira", kind="issue", external_id="SCRUM-42")
         .one()
     )
-    assert scrum_42.state == "In Progress"
-    assert scrum_42.meta["issuelinks"][0]["key"] == "SCRUM-45"
+    assert scrum_42.meta["labels"] == ["release-1.4", "critical-path", "payments"]
 
     pr_47 = (
-        session.query(Signal)
-        .filter(Signal.external_id == "47", Signal.kind == "pr")
-        .one()
+        session.query(Signal).filter_by(source="github", kind="pr", external_id="47").one()
     )
+    assert pr_47.state == "open"
     assert pr_47.meta["base_ref"] == "release/1.4"
-    assert pr_47.meta["reviews"] == []
