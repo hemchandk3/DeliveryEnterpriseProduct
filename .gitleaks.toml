@@ -1,0 +1,56 @@
+# gitleaks configuration — Techwave Delivery Intelligence & Governed Agent Platform
+# Secret-scanning gate for the >=99% security check (docs/ENGINEERING_STANDARDS.md).
+# Run locally:  gitleaks detect --config .gitleaks.toml --redact --no-banner
+# Enforced in CI: .github/workflows/security.yml
+#
+# Extends gitleaks' built-in rule set (GitHub PATs, AWS keys, generic API keys,
+# private keys, JWTs, etc.) and adds rules for the credentials this platform handles.
+
+[extend]
+useDefault = true
+
+# --- Custom rules for platform-specific credentials -------------------------
+
+[[rules]]
+id = "github-pat-finegrained"
+description = "GitHub fine-grained personal access token"
+regex = '''github_pat_[0-9a-zA-Z_]{22,255}'''
+keywords = ["github_pat_"]
+
+[[rules]]
+id = "github-token-classic"
+description = "GitHub classic token (ghp/gho/ghu/ghs/ghr)"
+regex = '''gh[pousr]_[0-9a-zA-Z]{36,255}'''
+keywords = ["ghp_", "gho_", "ghu_", "ghs_", "ghr_"]
+
+[[rules]]
+id = "atlassian-jira-api-token"
+description = "Atlassian / Jira API token (ATATT... format)"
+regex = '''ATATT[0-9a-zA-Z_\-=]{20,}'''
+keywords = ["ATATT"]
+
+[[rules]]
+id = "generic-secret-assignment"
+description = "Generic hardcoded secret/token/password assignment with a real value"
+regex = '''(?i)(api[_-]?key|secret|token|passwd|password)\s*[:=]\s*['\"][0-9a-zA-Z\-_\/+=]{16,}['\"]'''
+keywords = ["key", "secret", "token", "password", "passwd"]
+
+# --- Allowlist: never-secret paths and known placeholder values -------------
+
+[allowlist]
+description = "Placeholders, examples, fixtures, and vendored deps are not secrets"
+paths = [
+  '''\.env\.example$''',
+  '''(^|/)\.venv/''',
+  '''(^|/)node_modules/''',
+  '''backend/tests/fixtures/''',
+  '''(^|/)docs/security/''',
+  '''\.gitleaks\.toml$''',
+]
+regexes = [
+  '''(?i)(token|secret|key|password)\s*=\s*$''',
+  '''(?i)(token|secret|key|password)\s*=\s*<[^>]+>''',
+  '''your[_-]?token[_-]?here''',
+  '''customfield_10016''',
+  '''user:pass@''',
+]
