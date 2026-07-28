@@ -6,9 +6,10 @@ from sqlalchemy.exc import IntegrityError
 from app.models import Project, Signal
 
 
-def _signal(project_id: int, external_id: str = "1") -> Signal:
+def _signal(project_id: int, external_id: str = "1", organization_id: int = 1) -> Signal:
     now = datetime(2026, 7, 1, tzinfo=UTC)
     return Signal(
+        organization_id=organization_id,
         project_id=project_id,
         source="github",
         kind="pr",
@@ -23,7 +24,7 @@ def _signal(project_id: int, external_id: str = "1") -> Signal:
 
 
 def test_signal_persists_and_reads_back(session):
-    project = Project(key="SCRUM", name="DeliveryEnterprise")
+    project = Project(organization_id=1, key="SCRUM", name="DeliveryEnterprise")
     session.add(project)
     session.commit()
 
@@ -37,7 +38,7 @@ def test_signal_persists_and_reads_back(session):
 
 
 def test_signal_identity_is_unique(session):
-    project = Project(key="SCRUM", name="DeliveryEnterprise")
+    project = Project(organization_id=1, key="SCRUM", name="DeliveryEnterprise")
     session.add(project)
     session.commit()
 

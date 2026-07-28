@@ -43,7 +43,7 @@ def test_jira_connector_normalizes_full_fixture():
 
 
 def test_ingesting_the_demo_fixture_persists_scrum_42_evidence(session):
-    project = Project(key=demo.PROJECT_KEY, name="DeliveryEnterprise")
+    project = Project(organization_id=1, key=demo.PROJECT_KEY, name="DeliveryEnterprise")
     session.add(project)
     session.commit()
 

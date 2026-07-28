@@ -19,6 +19,12 @@ class Signal(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    # Denormalized from projects.organization_id: ADDED for tenant isolation
+    # (RLS predicate + index locality) rather than requiring every query to
+    # join through projects. See docs/db/schema.md (ASSUMPTION-1).
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="RESTRICT"), index=True
+    )
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
     source: Mapped[str] = mapped_column(index=True)  # "github" | "jira"
     kind: Mapped[str] = mapped_column(index=True)  # "pr" | "commit" | "issue" | "sprint"
