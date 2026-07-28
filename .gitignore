@@ -1,0 +1,28 @@
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+*.db
+
+# Node (frontend, when added)
+node_modules/
+dist/
+build/
+
+# Docker / OS
+*.log
+.DS_Store
+Thumbs.db
