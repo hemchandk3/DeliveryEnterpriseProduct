@@ -62,6 +62,7 @@ All backend code lives under `backend/app/`; tests mirror source under
 | Ingest service | `app/ingest/service.py` | Idempotent upsert of signals per project | built |
 | Ingest API | `app/api/ingest.py` | `POST /projects/{id}/ingest`; gateway/connector DI | built |
 | Demo dataset | `app/demo/*` | Curated Sprint-3 fixtures + mock gateways + loader; provenance | SCRUM-8 |
+| Data layer / migrations | `backend/migrations/*`, `app/models/{organization,user,connection,action,approval,audit_log}.py` | Alembic baseline + governance schema, tenant scope, RLS, append-only audit | db-schema PR #7 (SCRUM-12/13/14/19) |
 | Risk engine | `app/risk/*` | Sprint-health score + hidden-risk detection | SCRUM-9, SCRUM-10 |
 | Explain | `app/explain/*` | Deterministic citations + plain-language prose | SCRUM-11 |
 | LLM provider | `app/llm/*` | Model-agnostic provider boundary (default Claude) | SCRUM-11 |
@@ -186,10 +187,11 @@ Contracts are explicit, versioned by story, and testable. Types use Python 3.12 
 ### 5.1 Signal (built)
 
 ```python
-Signal(id, project_id, source, kind, external_id,
+Signal(id, project_id, organization_id, source, kind, external_id,
        title|None, state|None, actor|None,
        source_created_at, source_updated_at, meta: dict, ingested_at)
 # unique (project_id, source, kind, external_id)
+# organization_id: tenant scope, FK organizations.id (SCRUM-19 / db-schema PR #7; ADR-006)
 # provenance: "demo" | "live"  (SCRUM-8, non-null, default "live")
 ```
 
@@ -241,12 +243,23 @@ class ActionAdapter(Protocol):
     def execute(self, step: ActionStep) -> AdapterResult: ...   # mock-only in MVP
 ```
 
+**Persistence note (ADR-006).** The `actions` table stores `proposed_steps` /
+`edited_steps` as opaque JSON lists whose *element* shape must conform to `ActionStep`
+above (Pydantic-validated at the API boundary). The `actions` row **must carry a
+`risk_id` FK** so a bundle links back to the `Risk` it addresses (`ActionBundle{risk_id}`).
+
 ### 5.5 Govern (SCRUM-13, SCRUM-14)
 
 ```python
 AuditService.append(entry: AuditEntryIn) -> AuditEntry   # ONLY writer; no update/delete
-# AuditEntry{kind, actor, approver, occurred_at, operation, target,
-#            evidence_signal_ids[], payload, adapter_response, prev_hash, entry_hash}
+# AuditEntry{event_type, actor, approver, occurred_at, operation, target,
+#            evidence_signal_ids[], payload, adapter_response}
+#   event_type: free-text, indexed column; controlled vocabulary = the §6 typed set,
+#               enforced at the application layer (schema col name is `event_type`; ADR-006).
+#   approver / operation / adapter_response: present as columns OR pinned `payload`
+#               keys so an EXECUTION entry is self-contained (compliance A2/A4).
+#   prev_hash / entry_hash: OPTIONAL / roadmap — the REVOKE UPDATE,DELETE grant + the
+#               mutation-rejecting trigger are the source-of-truth control (ADR-006).
 
 ApprovalService.approve(bundle_id, approver)
 ApprovalService.reject(bundle_id, approver, reason)
@@ -280,13 +293,17 @@ Governance is a **cross-cutting layer** (`app/govern/`), not a per-agent add-on.
 
 - **Append-only audit** — `AuditService.append` is the sole writer and exposes no
   update/delete. Every stage writes a typed entry (`DETECTION`, `PROPOSED`, `APPROVAL`,
-  `EXECUTION`, `REJECTION`, `EDIT`, `DENIED`). **DBA owns the storage guarantee**:
+  `EXECUTION`, `REJECTION`, `EDIT`, `DENIED`) — this is the controlled vocabulary carried
+  in the `event_type` column (ADR-006). **DBA owns the storage guarantee**:
   `REVOKE UPDATE, DELETE` on the audit table for the app role plus a mutation-rejecting
   trigger; an optional `prev_hash → entry_hash` chain gives tamper evidence
   (defense-in-depth, DB trigger is source of truth).
-- **RBAC** (SCRUM-14) — JWT sessions carry `sub`, `org_id`, `role`. `approver` may
-  approve/reject/edit; `viewer` may not. Invalid credentials return a generic 401
-  (no factor disclosure). **Security owns the RBAC model**; Architect wires the DI seam.
+- **RBAC** (SCRUM-14) — JWT sessions carry `sub`, `organization_id`, `role`. `approver`
+  may approve/reject/edit; `viewer` may not; `admin` manages connections (SCRUM-19). The
+  app sets `SET LOCAL app.current_org_id` per request to drive Postgres RLS. Invalid
+  credentials return a generic 401 (no factor disclosure). **Security owns the RBAC model
+  and the exact role semantics** (roles are data-driven; see ADR-006); Architect wires
+  the DI seam.
 - **Approval gate** (SCRUM-13) — bundles are `PENDING_APPROVAL` until an authorised
   approver acts. No approver ⇒ zero adapter calls indefinitely. Approver identity is
   always recorded (never generic/system). Edit-then-approve runs only edited steps;
@@ -330,19 +347,27 @@ and provider egress.
 
 Onboarding lets an org connect its own Jira/GitHub instead of the pre-wired demo source.
 
-- **`Connection`** (`app/models/connection.py`) — `{id, org_id, source_type, base_url,
-  project_ref, secret_ref, enabled}`. **No credential columns** — only a `secret_ref`
-  pointer.
+- **`Connection`** (`app/models/connection.py`) — `{id, organization_id, source_type,
+  instance_url, target_ref, credential_ref, status}`. **No credential columns** — only a
+  `credential_ref` pointer into the `SecretStore`. (Column names reconciled with the
+  db-schema PR #7 in ADR-006; earlier drafts used `org_id`/`base_url`/`project_ref`/
+  `secret_ref`/`enabled`.)
 - **`SecretStore`** (`app/connections/secrets.py`, a `Protocol`: `put/get/delete`) —
   MVP impl `EnvelopeSecretStore` (encrypted at rest via an app KMS key); roadmap Vault /
   cloud secret manager behind the same Protocol. Credentials are **write-only from the
-  API** — never returned on a read, never in a ticket/log/DB row/plaintext.
+  API** — never returned on a read, never in a ticket/log/DB row/plaintext. The
+  `credential_ref` value is store-agnostic, so changing the store technology is **not** a
+  schema change (ADR-006, ruling on the DBA's secret-store question).
 - **Resolution:** `api/ingest.py::_build_gateway` resolves a `Connection` →
   `SecretStore.get` → a live gateway, replacing the hardcoded `settings` token. The
   connector and `IngestService` code is unchanged (gateway DI seam).
-- **Tenant isolation (DBA-owned):** every `Connection` and `Signal` carries `org_id`;
-  Postgres Row-Level Security ensures one org never sees another's connections or data.
-  This is the same RLS boundary the audit log (SCRUM-13) is scoped by.
+- **Tenant isolation (DBA-owned).** The tenant grain is **organization**; every
+  tenant-scoped table (`projects`, `signals`, `connections`, `actions`, `approvals`,
+  `audit_log`, `users`) carries a denormalized `organization_id`, and Postgres Row-Level
+  Security scopes reads to `current_setting('app.current_org_id')` — one org never sees
+  another's connections or data. `projects.key` is unique **per organization**
+  (`(organization_id, key)`), not globally (ADR-006). RLS must also cover the `user_roles`
+  join table before merge (ADR-006).
 - **Ownership:** Security owns credential handling + the threat model; DBA owns RLS;
   Compliance owns the data-classification entry for stored credentials. All three plus
   a threat model are **mandatory** before implementation — highest-sensitivity story.
@@ -357,7 +382,7 @@ Prefer boring, proven, observable stacks. Support cloud, hybrid, and on-prem.
 |---|---|---|
 | Language / API | Python 3.12 + FastAPI | Already in place (PR #1); typed, fast, testable |
 | Validation | Pydantic v2 | Explicit request/response + `SignalIn` contracts |
-| ORM / DB | SQLAlchemy 2.x; **PostgreSQL** (SQLite for tests) | Boring, portable, supports RLS + append-only grants for governance/tenant isolation |
+| ORM / DB | SQLAlchemy 2.x; **PostgreSQL** (SQLite for tests); Alembic migrations | Boring, portable, supports RLS + append-only grants for governance/tenant isolation |
 | HTTP client | httpx | Live gateways; `MockTransport` for tests |
 | Config | pydantic-settings | Env-driven; **no secrets in code** |
 | LLM | `anthropic` SDK, `claude-opus-4-8` behind `LLMProvider` | Latest Claude default; model-agnostic seam |
@@ -416,13 +441,62 @@ uses plain columns and rule-based heuristics only.
 ### ADR-005 — Secret-store boundary + Postgres RLS for connections/tenancy
 - **Context.** SCRUM-19 stores customer credentials and enables cross-tenant data — the
   highest-sensitivity story.
-- **Decision.** Store only a `secret_ref` on `Connection`; keep credentials in a
-  `SecretStore` (write-only from the API); scope every `Connection`/`Signal` by `org_id`
-  under Postgres RLS.
+- **Decision.** Store only a credential *reference* on `Connection`; keep credentials in a
+  `SecretStore` (write-only from the API); scope every `Connection`/`Signal` by
+  `organization_id` under Postgres RLS.
 - **Consequences.** Credentials never transit reads/logs/rows; tenant isolation is a DB
   guarantee, not app-code discipline. Requires Security + DBA + Compliance sign-off.
 - **Alternatives rejected.** Encrypted credential column (still returned/logged by
   mistake); app-level tenant filtering only (one missed `WHERE` = cross-tenant leak).
+
+### ADR-006 — Data-layer reconciliation with the db-schema PR (PR #7 / `feat/db-schema`)
+- **Context.** The DBA authored the concrete data layer (Alembic baseline + eight
+  governance tables) in parallel with this document and raised **7 explicit
+  reconciliation questions**. This ADR records the architect's ruling on each so
+  ARCHITECTURE and the schema agree before implementation. It supersedes the naming used
+  in earlier drafts of §5.5/§8 where they differ.
+- **Decision.**
+  1. **Tenant grain = organization (confirmed).** Already implied by §8/ADR-005; now
+     explicit. The canonical tenant column is **`organization_id`** (FK `organizations.id`),
+     denormalized onto every tenant-scoped table. The label `org_id` used in earlier drafts
+     is retired in favour of `organization_id`.
+  2. **`projects.key` is unique per organization** `(organization_id, key)`; PR #1's global
+     unique on `key` is dropped. Two orgs may both run a "SCRUM" project.
+  3. **RBAC roles `{admin, approver, viewer}`** accepted as the seed; `admin` is the
+     org-management role SCRUM-19 needs. Roles stay data-driven (`roles` + `user_roles`).
+     **Security owns the final role semantics** (§6).
+  4. **Secret store:** the opaque **`credential_ref`** pointer is confirmed; the MVP store
+     is **`EnvelopeSecretStore`** (ADR-005), *not* Vault. The pointer is store-agnostic, so
+     the store technology can change with no schema change.
+  5. **`Action`/`Approval` steps stay opaque JSON** for the MVP, but each element must
+     conform to the §5.4 `ActionStep` shape (Pydantic-validated at the API). **`actions`
+     must carry a `risk_id` FK** to match `ActionBundle{risk_id}`. Normalize to a child
+     table only if a per-step query access pattern emerges (roadmap).
+  6. **`evidence_signal_ids` stays a JSON array** (matches the §5.4/§5.5 contract); no join
+     table for the MVP — §5.6 has no reverse "audit entries by signal" access pattern. If
+     analytics/compliance need reverse queries at volume, add a GIN index or an
+     `audit_log_evidence(audit_log_id, signal_id)` join later (roadmap).
+  7. **The `user_roles` RLS gap must be closed before merge** (not risk-accepted):
+     denormalize `organization_id` onto `user_roles` + a standard RLS policy (consistent
+     with every other table), per ADR-005's "isolation is a DB guarantee, not app-code
+     discipline." Security signs off.
+  8. **Audit naming reconciled:** the contract's `kind` maps to the schema column
+     **`event_type`** (free-text/indexed; the §6 uppercase set is the app-enforced
+     controlled vocabulary). An EXECUTION entry must still carry **approver identity,
+     operation, target, evidence_signal_ids, and adapter_response** — as columns or pinned
+     `payload` keys — so the record is self-contained (compliance A2/A4). The
+     `prev_hash → entry_hash` chain is **optional/roadmap**; the REVOKE + trigger is the
+     control.
+  9. **pgvector/embeddings stay out of scope** (§9/§11).
+- **Consequences.** The db-schema PR is mergeable once it (a) adds `actions.risk_id`,
+  (b) closes the `user_roles` RLS gap, and (c) has migration 0008 executed against a real
+  Postgres (devops) with Security review of the RLS predicates. Naming across ARCHITECTURE
+  and the schema now matches; the developer building SCRUM-13/14/19 has one source of truth.
+  The Security + Compliance sign-off gate on SCRUM-13/14/19 is unchanged.
+- **Alternatives rejected.** Single-tenant-per-deployment (loses the shared-DB multi-org
+  seam §8/ADR-005 already commit to); normalized step/evidence tables now (premature —
+  no MVP access pattern needs them); accepting the `user_roles` RLS gap for the MVP
+  (violates ADR-005's DB-guarantee principle).
 
 ---
 
@@ -443,7 +517,7 @@ secret-store boundary.
 - Live action adapters that write to real Jira/GitHub (MVP is mock-only by design).
 - Multi-tier approval, delegation, SLA timers; SSO/SAML, self-signup, credential rotation.
 
-Seams are in place for these (provider interface, adapter Protocol, `org_id`/RLS,
+Seams are in place for these (provider interface, adapter Protocol, `organization_id`/RLS,
 persisted `trigger_signal_ids`/outcomes) so the roadmap does not require re-architecture —
 but none of it is implemented in the MVP.
 
