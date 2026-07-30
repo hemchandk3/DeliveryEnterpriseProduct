@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TECH DOC — Delivery-health dashboard + hidden-risk reveal</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 52rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+    h1, h2 { border-bottom: 1px solid #ddd; padding-bottom: .3rem; }
+    code, pre { background: #f4f4f4; }
+    pre { padding: 1rem; overflow: auto; }
+    .meta { color: #555; font-size: .95rem; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #ccc; padding: .4rem .6rem; text-align: left; }
+  </style>
+</head>
+<body>
+  <h1>Delivery-health dashboard + hidden-risk reveal</h1>
+  <p class="meta">
+    <strong>Ticket:</strong> SCRUM-16 ·
+    <strong>Owner:</strong> frontend ·
+    <strong>Status:</strong> current ·
+    <strong>Updated:</strong> 2026-07-30
+  </p>
+
+  <h2>1. Purpose</h2>
+  <p>
+    The <strong>Explain</strong>-adjacent surface of the Detect→Explain→Act→Govern→Report loop:
+    for whichever project the tenant has selected, the delivery-health dashboard renders the
+    sprint's "green surface" (health banner, four metric cards, story-point burndown,
+    issue-status breakdown) and, in the same view, the hidden-risk reveal — the red attention
+    banner and at-risk card for the story the board doesn't flag. Clicking "View evidence" opens
+    a focus-trapped drawer citing the Detect engine's own reasons and evidence pointers. Both
+    truths (surface health and hidden risk) are visible at once, sourced entirely from the live
+    Detect API for the tenant's own connected project — never a hardcoded or demo dataset.
+  </p>
+
+  <h2>2. Owns / boundaries</h2>
+  <ul>
+    <li><strong>In scope:</strong> <code>frontend/</code> React+TS+Vite+Tailwind+shadcn app —
+      project selection (<code>App.tsx</code>, <code>features/projects/ProjectSelector.tsx</code>,
+      <code>features/projects/ConnectProjectDialog.tsx</code>,
+      <code>features/projects/NoProjectsEmptyState.tsx</code>), the dashboard
+      (<code>DashboardPage</code>, <code>SprintHealthPanel</code>, <code>BurndownChart</code>,
+      <code>StatusBreakdown</code>, <code>RiskReveal</code>, <code>RiskCard</code>,
+      <code>ExplanationPanel</code>/<code>CitationRow</code>), the typed API client
+      (<code>src/api/client.ts</code>, <code>src/api/queries.ts</code>, <code>src/api/types.ts</code>),
+      the app shell/nav/skip-link, the light/dark design-token layer
+      (<code>tailwind.config.ts</code>, <code>src/index.css</code>), and this doc. Vitest+RTL
+      component tests and coverage config live here too.</li>
+    <li><strong>Out of scope:</strong>
+      <ul>
+        <li>Risk scoring / detection logic — owned by <code>developer</code>/<code>analytics</code>
+          (<code>backend/app/risk/</code>, SCRUM-9/10, already merged in PR #6).</li>
+        <li><code>GET /risks/&#123;id&#125;/explanation</code> (deterministic <code>Citation</code>
+          set: source_ref/field/quoted_value/deep_link) — SCRUM-11, owned by <code>developer</code>.
+          Until it exists, <code>ExplanationPanel</code> renders the Detect engine's own
+          <code>reasons[]</code> / <code>evidence_refs[]</code> as an honest interim seam — see
+          <code>TODO(SCRUM-11)</code> in <code>src/api/types.ts</code> and
+          <code>ExplanationPanel.tsx</code>.</li>
+        <li><strong>Connections management (SCRUM-19)</strong> — full list/test/edit/delete UI for
+          existing connections is its own ticket, not built here. This PR wires the typed
+          <code>POST /projects</code> / <code>POST /projects/{id}/connections</code> calls behind
+          a minimal "Connect a project" entry point (<code>ConnectProjectDialog</code>) so the
+          UI has a real, honest first-class connect action — see
+          <code>TODO(SCRUM-19)</code> in <code>src/api/client.ts</code> and
+          <code>src/api/types.ts</code>. Both endpoints are undeployed today, so submitting the
+          form surfaces the backend's real error; nothing here fakes a successful connection.</li>
+        <li>Auth/session (SCRUM-14) — <code>authHeaders()</code> in <code>client.ts</code> is a
+          documented no-op stub until the backend enforces sessions.</li>
+        <li>Tenant isolation enforcement itself (RLS, JWT org scoping) — owned by
+          <code>architect</code>/<code>dba</code>/<code>security</code> per
+          <code>docs/technical/multi-tenancy-and-project-grain.html</code>; the frontend's
+          obligation (see §3) is to never originate an id itself, only ever pass through ids
+          the backend already returned.</li>
+        <li>Approval-gate UI and governance/audit view — SCRUM-17, frontend but a separate
+          ticket/doc, blocked on its backend (SCRUM-12/13).</li>
+      </ul>
+    </li>
+  </ul>
+
+  <h2>3. Design summary</h2>
+  <p>
+    Single-route SPA (no router — MVP scope is one dashboard screen, ARCHITECTURE.md §11).
+    <code>main.tsx</code> wraps <code>App</code> in a <code>QueryClientProvider</code>. All
+    server state goes through TanStack Query (<code>src/api/queries.ts</code>) — no fetching in
+    render, no client-side scoring or business logic; the UI renders exactly what the backend
+    returns.
+  </p>
+  <p>
+    <strong>No demo/hardcoded project (scope-change 2026-07-30).</strong> The dashboard no
+    longer reads a build-time <code>VITE_PROJECT_ID</code>/<code>VITE_SPRINT_ID</code> or shows
+    a static "Demo data" badge. <code>App.tsx</code> now calls the real
+    <code>useProjects()</code> (<code>GET /projects</code>) and drives everything from that
+    response:
+  </p>
+  <ul>
+    <li><strong>Zero projects</strong> → <code>NoProjectsEmptyState</code>, a first-run page
+      (not an afterthought) explaining there's nothing connected yet, with the
+      <code>ConnectProjectDialog</code> CTA.</li>
+    <li><strong>One or more projects</strong> → the top bar's <code>ProjectSelector</code> (a
+      native, fully keyboard/screen-reader-accessible <code>&lt;select&gt;</code> — no new
+      dependency) lists them by name/key; the first is auto-selected.</li>
+    <li><strong>Selected project has a computed sprint snapshot</strong>
+      (<code>Project.latest_health</code>, ARCHITECTURE.md §5.7 <code>ProjectHealthSnapshot</code>)
+      → <code>DashboardPage</code> renders for that <code>project.id</code> +
+      <code>latest_health.sprint_external_id</code>. Neither id is ever typed in or
+      defaulted client-side — both come straight off the <code>GET /projects</code> response.</li>
+    <li><strong>Selected project has no snapshot yet</strong> → an honest inline message, not a
+      blank dashboard.</li>
+  </ul>
+  <p>
+    <strong>Multi-tenancy (cross-check <code>docs/technical/multi-tenancy-and-project-grain.html</code>).</strong>
+    Tenant scoping is a server-side invariant (JWT <code>org_id</code> → Postgres RLS, ADR-006) —
+    the frontend never sends or accepts an org id. Every project/sprint id the UI uses is sourced
+    from a response the backend already scoped to the caller's tenant (<code>GET /projects</code>);
+    a cross-tenant id typed into a URL would 404, never leak a row. This is why the project
+    selector — not a free-text/URL id — is the only way to change which project's data is shown.
+  </p>
+  <p>
+    <strong>Data flow (dashboard, once a project+sprint are known):</strong>
+    <code>useSprintHealth(projectId, sprintId)</code> calls
+    <code>GET /projects/&#123;id&#125;/sprints/&#123;sprint_id&#125;/health</code>;
+    <code>useRiskReveal(projectId)</code> calls <code>GET /projects/&#123;id&#125;/risks</code>
+    and, because the loop runner (SCRUM-18) that would normally sequence Ingest→Detect doesn't
+    exist yet, self-heals once — the first time the risk list comes back empty it fires
+    <code>POST /projects/&#123;id&#125;/risks/detect</code> and refetches. This does not invent
+    data client-side; it only asks the backend's own detector to run.
+  </p>
+  <p>
+    <strong>The reveal pattern</strong> (ux-spec §4.2): <code>SprintHealthPanel</code> and
+    <code>RiskReveal</code> render in the same scroll region, both driven by their own
+    <code>StateBoundary</code> (loading/error/success — never a blank screen). Nothing swaps
+    out; the green surface stays visible while the risk card appears alongside it, which is
+    the SCRUM-16 AC "contradiction visible in one view."
+  </p>
+  <p>
+    <strong>Modern, token-driven design system with real light/dark
+    (scope-change 2026-07-30).</strong> Every semantic color name in
+    <code>tailwind.config.ts</code> (<code>canvas</code>, <code>surface</code>,
+    <code>subtle</code>, <code>border</code>, <code>accent</code>, <code>text-*</code>,
+    <code>status-*</code>) resolves to a CSS custom property defined in <code>src/index.css</code>
+    — a light value set under <code>:root</code> and a dark value set under
+    <code>@media (prefers-color-scheme: dark)</code>, following the shadcn
+    <code>rgb(var(--x) / &lt;alpha-value&gt;)</code> convention. No component hardcodes a hex
+    value or a raw Tailwind gray (the earlier <code>border-slate-200</code>-style classes were
+    swapped for the <code>border</code> token; the burndown chart's inline SVG strokes read
+    <code>var(--chart-*)</code> since Tailwind utilities don't reach raw <code>stroke=""</code>
+    attributes). One accent (indigo) is used for primary actions and focus rings; risk semantics
+    stay to green/amber/red. Cards dropped their drop-shadow in favor of a single subtle border
+    (Linear/Vercel-style flat surface, not a legacy admin-panel shadow stack). All motion still
+    respects <code>prefers-reduced-motion</code> (unchanged from the original build).
+  </p>
+  <p>
+    <strong>Accessibility fixes applied from <code>docs/ux/ux-spec.md</code></strong> (§4.3, §9,
+    §12 severity-ranked items) — unchanged by the scope-change pivot, still all in place:
+  </p>
+  <ul>
+    <li><strong>[Blocker] Reveal announced to assistive tech</strong> — <code>RiskReveal</code>'s
+      outer <code>&lt;section&gt;</code> carries <code>role="status" aria-live="polite"</code>
+      (WCAG 4.1.3).</li>
+    <li><strong>[Blocker] Status not by color alone</strong> — status banners, badges, and the
+      burndown chart all pair an icon/line-style + text label, and the burndown series is also
+      exposed as a real, visually-hidden <code>&lt;table&gt;</code> (WCAG 1.4.1 / 1.3.1).</li>
+    <li><strong>[High] Contrast</strong> — corrected light-mode values from the ux-spec carry
+      over unchanged; dark-mode values follow the same Tailwind slate/semantic scale one step
+      shifted, flagged here for a UX re-verify pass the same way the original light-mode fixes
+      were called out one value at a time (§9 below).</li>
+    <li><strong>[High] Explanation drawer is a focus-trapped, escapable dialog</strong> — Radix
+      <code>Dialog</code> (WCAG 2.1.2); reused unmodified for <code>ConnectProjectDialog</code>.</li>
+    <li><strong>[Medium] ≥24px targets</strong> — <code>Button</code>, the native
+      <code>ProjectSelector</code> <code>&lt;select&gt;</code>, and evidence chips all keep a
+      ≥36px hit area (WCAG 2.5.8).</li>
+    <li><strong>Keyboard/focus order</strong> (§4.4) — <code>SkipLink</code> first, top-bar
+      project selector → connect CTA → page content, visible <code>:focus-visible</code> ring
+      (now accent-colored, still ≥3:1) global in <code>index.css</code>.</li>
+  </ul>
+  <p>No new ADR required — this consumes the already-designed §5.6 endpoints as-is; no new
+  runtime dependency was added (the project selector is a native <code>&lt;select&gt;</code>,
+  not a new Radix/combobox package).</p>
+
+  <h2>4. Interfaces</h2>
+  <table>
+    <thead><tr><th>Kind</th><th>Name</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>API (consumed)</td><td><code>GET /projects</code></td><td>ARCHITECTURE.md §5.6/§13.7, cursor-paginated. <code>src/api/client.ts::getProjects</code> → <code>ProjectListResponse</code>. Tenant-scoped server-side from the JWT; drives <code>ProjectSelector</code> and the first-run empty state. <strong>Not yet implemented by the backend</strong> (no ticket has shipped it) — the UI's loading/error/empty states are exercised honestly against that reality today.</td></tr>
+      <tr><td>API (consumed)</td><td><code>POST /projects</code>, <code>POST /projects/&#123;id&#125;/connections</code></td><td>ARCHITECTURE.md §5.6. <code>createProject</code>, <code>createConnection</code> in <code>client.ts</code>. TODO(SCRUM-19) — backend not built; <code>ConnectProjectDialog</code> surfaces the real resulting error, never a fake success.</td></tr>
+      <tr><td>API (consumed)</td><td><code>GET /projects/&#123;id&#125;/sprints/&#123;sprint_id&#125;/health</code></td><td>ARCHITECTURE.md §5.6, SCRUM-9. <code>getSprintHealth</code> → <code>SprintHealth</code>.</td></tr>
+      <tr><td>API (consumed)</td><td><code>GET /projects/&#123;id&#125;/risks</code></td><td>ARCHITECTURE.md §5.6, SCRUM-10. <code>getRisks</code> → <code>RiskFinding[]</code>.</td></tr>
+      <tr><td>API (consumed)</td><td><code>POST /projects/&#123;id&#125;/risks/detect</code></td><td>Idempotent re-scan. Auto-triggered once by <code>useRiskReveal</code> when the risk list is empty (interim seam pending SCRUM-18 loop runner).</td></tr>
+      <tr><td>Type</td><td><code>Project</code>, <code>ProjectListResponse</code>, <code>ProjectHealthSummary</code></td><td><code>src/api/types.ts</code> — new this PR. <code>latest_health.sprint_external_id</code> is what lets the UI skip a separate sprint picker.</td></tr>
+      <tr><td>Type</td><td><code>Connection</code>, <code>ConnectionSourceType</code></td><td><code>src/api/types.ts</code> — new this PR, TODO(SCRUM-19).</td></tr>
+      <tr><td>Type</td><td><code>SprintHealth</code>, <code>BurndownPoint</code>, <code>HealthFactor</code>, <code>RiskFinding</code>, <code>EvidenceRef</code></td><td><code>src/api/types.ts</code> — snake_case, mirrors backend Pydantic verbatim. <code>TODO(SCRUM-11)</code> unchanged.</td></tr>
+      <tr><td>Component</td><td><code>App</code></td><td><code>src/App.tsx</code> — owns project selection state; renders <code>NoProjectsEmptyState</code> / dashboard / no-snapshot-yet branches.</td></tr>
+      <tr><td>Component</td><td><code>ProjectSelector</code></td><td><code>src/features/projects/ProjectSelector.tsx</code> — native <code>&lt;select&gt;</code> over the real <code>GET /projects</code> list.</td></tr>
+      <tr><td>Component</td><td><code>ConnectProjectDialog</code></td><td><code>src/features/projects/ConnectProjectDialog.tsx</code> — the first-class "connect external project/tools" entry point.</td></tr>
+      <tr><td>Component</td><td><code>NoProjectsEmptyState</code></td><td><code>src/features/projects/NoProjectsEmptyState.tsx</code> — required first-run design.</td></tr>
+      <tr><td>Component</td><td><code>DashboardPage</code></td><td><code>src/features/dashboard/DashboardPage.tsx</code> — now takes <code>projectId</code>/<code>sprintId</code> as props (previously read env vars).</td></tr>
+      <tr><td>Component</td><td><code>RiskReveal</code></td><td>Unchanged behavior; token-only styling swap.</td></tr>
+      <tr><td>Component</td><td><code>ExplanationPanel</code> / <code>CitationRow</code></td><td>Unchanged behavior; token-only styling swap.</td></tr>
+      <tr><td>Hook</td><td><code>useProjects</code>, <code>useCreateProject</code>, <code>useCreateConnection</code></td><td><code>src/api/queries.ts</code> — new this PR.</td></tr>
+      <tr><td>Hook</td><td><code>useSprintHealth</code>, <code>useRiskReveal</code></td><td>Unchanged.</td></tr>
+      <tr><td>Design tokens</td><td><code>tailwind.config.ts</code> colors, <code>src/index.css</code> <code>:root</code> / dark-media vars</td><td>New this PR — see §3. Replaces the old static hex-only Tailwind theme.</td></tr>
+      <tr><td>Env var</td><td><code>VITE_BACKEND_ORIGIN</code></td><td><code>frontend/.env.example</code>. <code>VITE_PROJECT_ID</code>/<code>VITE_SPRINT_ID</code>/<code>VITE_DATA_PROVENANCE</code> <strong>removed this PR</strong> — no more env-configured or demo-flagged project.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>5. How to run / verify</h2>
+  <pre>cd frontend
+# install (already run in this env; node_modules present)
+node node_modules/typescript/bin/tsc -b --noEmit
+# → no output, exit 0
+
+node node_modules/eslint/bin/eslint.js .
+# → 1 pre-existing warning (client.ts unused `cause` in catch), 0 errors
+
+node node_modules/vitest/vitest.mjs run --coverage --pool=forks --poolOptions.forks.singleFork=true
+# → Test Files 17 passed (17), Tests 72 passed (72)
+# → All files: 99.94% Stmts | 98.53% Branch | 94.44% Funcs | 99.94% Lines
+#   (coverage.thresholds in vitest.config.ts: 80/70/80/80 -- gate passes)
+# (--pool=forks --poolOptions.forks.singleFork=true works around a
+#  Windows-only tinypool/vitest worker-teardown EPERM after tests finish;
+#  the default pool passes the same tests but can crash node during cleanup
+#  in this environment -- tracked as a local dev-env quirk, not a code bug.)
+
+node node_modules/typescript/bin/tsc -b && node node_modules/vite/bin/vite.js build
+# → ✓ built in ~8s, dist/assets/index-*.js ~279KB (88KB gzip)
+
+npm run dev   # local dev server, proxies /api/* -> http://localhost:8000
+npm run e2e   # Playwright demo-path spec (e2e/), requires the backend running
+</pre>
+  <p>
+    Manual walkthrough (ux-spec §11 Validate protocol, updated for the project-selector flow):
+    load the app → with zero connected projects, the first-run empty state and its "Connect a
+    project" CTA render (never a dashboard, never sample data) → once at least one project is
+    connected and has a computed sprint snapshot, the dashboard for the first project loads
+    automatically → the green "On track" surface renders → the red "Delivery Intelligence found
+    N hidden risks" banner and card(s) appear in the same view → "View evidence" opens the
+    focus-trapped drawer with the cited reasons/evidence rows → Esc returns focus to the trigger
+    → switching projects via the top-bar selector re-fetches health/risks scoped to the newly
+    selected project only. All from live <code>GET</code> calls, no client-side mocking.
+  </p>
+
+  <h2>6. Change log</h2>
+  <ul>
+    <li><strong>2026-07-30 (later same day) — scope-change pivot.</strong> Coordinator directive
+      (post-initial-PR-push, pre-merge): removed the env-configured single project and the
+      static "Demo data" badge entirely (deleted <code>DemoDataBadge.tsx</code>); added real
+      project selection (<code>useProjects</code>, <code>ProjectSelector</code>), the first-class
+      "Connect a project" entry point (<code>ConnectProjectDialog</code>, TODO(SCRUM-19) seam),
+      and the required first-run empty state (<code>NoProjectsEmptyState</code>); reworked the
+      color system into CSS-variable design tokens with real light/dark support
+      (<code>tailwind.config.ts</code>, <code>src/index.css</code>), dropped card drop-shadows
+      for a flat bordered surface, added a single indigo accent, and swapped every raw
+      Tailwind-gray border class for the new <code>border</code> token. Re-verified tenant
+      scoping against <code>docs/technical/multi-tenancy-and-project-grain.html</code> — every
+      id used downstream is sourced from <code>GET /projects</code>, never client-invented.
+      Test suite grew to 72 tests / 17 files (99.94% stmts, 98.53% branch, 94.44% funcs);
+      <code>tsc</code>, <code>eslint</code>, <code>vitest --coverage</code>, and
+      <code>vite build</code> all re-verified green.</li>
+    <li><strong>2026-07-30 — initial doc.</strong> Dashboard + hidden-risk reveal (SCRUM-16)
+      complete: green surface, burndown, status breakdown, aria-live reveal, evidence drawer
+      with <code>TODO(SCRUM-11)</code> seam, ux-spec §4/§5 accessibility blockers implemented.
+      53 tests / 15 files, 100% stmts/lines, 98.94% branch, 95.65% funcs. Superseded same-day by
+      the scope-change entry above before this branch was opened as a PR.</li>
+  </ul>
+</body>
+</html>
