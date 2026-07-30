@@ -1,0 +1,37 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-canvas text-text-primary font-sans;
+    line-height: 1.5; /* WCAG 1.4.12 Text Spacing: body line-height >= 1.4x */
+  }
+
+  /* WCAG 2.4.7 Focus Visible: a visible, >=3:1 focus indicator on every
+     interactive control, keyboard-only (mouse/touch clicks don't show it). */
+  :focus-visible {
+    outline: 2px solid #1d4ed8;
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  /* ux-spec §3: the reveal must have a non-animated equivalent for
+     prefers-reduced-motion (WCAG 2.3.3 spirit). */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
