@@ -1,0 +1,111 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Design tokens (light + dark) -- coordinator scope-change requirement:
+ * "modern 2026-era design language ... a real theme (light/dark) via CSS
+ * variables." Values are space-separated RGB triplets so Tailwind's
+ * `rgb(var(--x) / <alpha-value>)` pattern (tailwind.config.ts) can apply
+ * opacity modifiers (e.g. `bg-accent/10`). Dark values follow the same
+ * Tailwind slate/semantic scale as light, just shifted, so contrast stays
+ * in the same family verified for light mode (docs/ux/ux-spec.md §9) --
+ * flagged here for a UX re-verify pass on dark, same as the light-mode
+ * fixes were originally called out one value at a time.
+ */
+:root {
+  --color-canvas: 238 242 246; /* slate-100-ish page background */
+  --color-surface: 255 255 255; /* white cards */
+  --color-subtle: 248 250 252; /* slate-50 fills */
+  --color-skeleton: 226 232 240; /* slate-200 loading blocks */
+  --color-border: 226 232 240; /* slate-200 hairlines */
+  --color-accent: 79 70 229; /* indigo-600 -- the one accent */
+  --color-text-primary: 15 23 42; /* slate-900 */
+  --color-text-secondary: 71 85 105; /* slate-600 */
+  --color-text-muted: 100 116 139; /* slate-500 */
+
+  --status-green-text: 22 101 52;
+  --status-green-bg: 220 252 231;
+  --status-green-border: 134 239 172;
+  --status-red-text: 185 28 28;
+  --status-red-bg: 254 226 226;
+  --status-red-border: 252 165 165;
+  --status-amber-text: 180 83 9;
+  --status-amber-bg: 254 243 199;
+  --status-amber-border: 253 230 138;
+  --status-info-text: 29 78 216;
+  --status-info-bg: 219 234 254;
+  --status-info-border: 191 219 254;
+
+  /* Burndown chart line colors -- inline SVG stroke attrs read these via
+     `var(--chart-*)` (SVG accepts CSS var() in presentation attributes),
+     since Tailwind utility classes don't reach raw SVG `stroke=""`. */
+  --chart-actual: #1d4ed8;
+  --chart-ideal: #475569;
+  --chart-baseline: #94a3b8;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-canvas: 2 6 23; /* slate-950 */
+    --color-surface: 15 23 42; /* slate-900 */
+    --color-subtle: 30 41 59; /* slate-800 */
+    --color-skeleton: 51 65 85; /* slate-700 */
+    --color-border: 71 85 105; /* slate-600 -- kept a step lighter than surface for visibility */
+    --color-accent: 129 140 248; /* indigo-400 -- lighter for dark backgrounds */
+    --color-text-primary: 248 250 252; /* slate-50 */
+    --color-text-secondary: 148 163 184; /* slate-400 */
+    --color-text-muted: 100 116 139; /* slate-500 */
+
+    --status-green-text: 74 222 128;
+    --status-green-bg: 20 60 38;
+    --status-green-border: 34 110 63;
+    --status-red-text: 248 113 113;
+    --status-red-bg: 69 15 15;
+    --status-red-border: 127 29 29;
+    --status-amber-text: 251 191 36;
+    --status-amber-bg: 69 41 8;
+    --status-amber-border: 146 64 14;
+    --status-info-text: 96 165 250;
+    --status-info-bg: 23 37 84;
+    --status-info-border: 30 58 138;
+
+    --chart-actual: #60a5fa;
+    --chart-ideal: #94a3b8;
+    --chart-baseline: #475569;
+  }
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-canvas text-text-primary font-sans;
+    line-height: 1.5; /* WCAG 1.4.12 Text Spacing: body line-height >= 1.4x */
+  }
+
+  /* WCAG 2.4.7 Focus Visible: a visible, >=3:1 focus indicator on every
+     interactive control, keyboard-only (mouse/touch clicks don't show it). */
+  :focus-visible {
+    outline: 2px solid rgb(var(--color-accent));
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  /* ux-spec §3: the reveal must have a non-animated equivalent for
+     prefers-reduced-motion (WCAG 2.3.3 spirit). */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
