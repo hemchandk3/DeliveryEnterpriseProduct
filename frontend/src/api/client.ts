@@ -1,4 +1,12 @@
-import type { ApiErrorBody, RiskFinding, SprintHealth } from "./types";
+import type {
+  ApiErrorBody,
+  Connection,
+  ConnectionSourceType,
+  Project,
+  ProjectListResponse,
+  RiskFinding,
+  SprintHealth,
+} from "./types";
 
 /**
  * Typed API client for the Detect-stage backend surface (ARCHITECTURE.md
@@ -72,6 +80,45 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     return undefined as T;
   }
   return (await response.json()) as T;
+}
+
+/**
+ * `GET /projects` -- ARCHITECTURE.md §5.6, cursor-paginated (§13.7). This is
+ * the tenant's actually-connected project list (never a hardcoded/demo
+ * one) and is what feeds `ProjectSelector`. Tenant scoping happens
+ * server-side from the JWT; no org id is ever passed here.
+ */
+export function getProjects(cursor?: string): Promise<ProjectListResponse> {
+  const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+  return request<ProjectListResponse>(`/projects${query}`);
+}
+
+// TODO(SCRUM-19 / SCRUM-connections): `POST /projects` and
+// `POST /projects/{id}/connections` are designed (ARCHITECTURE.md §5.6) but
+// not yet implemented by the backend -- SCRUM-19 (connections) is still
+// `stage-todo`. These calls are wired for real so the "Connect a project"
+// entry point (ConnectProjectDialog.tsx) is honest: it will surface the
+// backend's real 404/501 today via ApiError, never fake a created project.
+export function createProject(input: { key: string; name: string }): Promise<Project> {
+  return request<Project>(`/projects`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function createConnection(
+  projectId: number,
+  input: {
+    source_type: ConnectionSourceType;
+    display_name: string;
+    base_url: string;
+    project_ref: string;
+  }
+): Promise<Connection> {
+  return request<Connection>(`/projects/${projectId}/connections`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
 }
 
 /** `GET /projects/{id}/sprints/{sprint_id}/health` -- ARCHITECTURE.md §5.6. */

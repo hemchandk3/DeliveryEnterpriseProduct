@@ -1,6 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError, detectRisks, getRisks, getSprintHealth } from "./client";
-import { makeRiskFinding, makeSprintHealth } from "@/test/fixtures";
+import {
+  ApiError,
+  createConnection,
+  createProject,
+  detectRisks,
+  getProjects,
+  getRisks,
+  getSprintHealth,
+} from "./client";
+import { makeProject, makeProjectListResponse, makeRiskFinding, makeSprintHealth } from "@/test/fixtures";
 
 function jsonResponse(body: unknown, init: ResponseInit = {}) {
   return new Response(JSON.stringify(body), {
@@ -98,6 +106,67 @@ describe("api/client", () => {
     const result = await detectRisks(1);
 
     expect(result).toBeUndefined();
+  });
+
+  it("getProjects calls GET /projects with no cursor by default", async () => {
+    const response = makeProjectListResponse();
+    fetchMock.mockResolvedValueOnce(jsonResponse(response));
+
+    const result = await getProjects();
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/projects", expect.anything());
+    expect(result).toEqual(response);
+  });
+
+  it("getProjects appends an encoded cursor when paginating", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(makeProjectListResponse()));
+
+    await getProjects("cursor a/b");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/projects?cursor=cursor%20a%2Fb",
+      expect.anything()
+    );
+  });
+
+  it("createProject POSTs the key/name to /projects", async () => {
+    const project = makeProject();
+    fetchMock.mockResolvedValueOnce(jsonResponse(project));
+
+    const result = await createProject({ key: "SCRUM", name: "Checkout Hardening" });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/projects",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ key: "SCRUM", name: "Checkout Hardening" }),
+      })
+    );
+    expect(result).toEqual(project);
+  });
+
+  it("createConnection POSTs to /projects/{id}/connections", async () => {
+    const connection = {
+      id: 1,
+      project_id: 1,
+      source_type: "jira" as const,
+      display_name: "Checkout Hardening",
+      enabled: true,
+    };
+    fetchMock.mockResolvedValueOnce(jsonResponse(connection));
+
+    const result = await createConnection(1, {
+      source_type: "jira",
+      display_name: "Checkout Hardening",
+      base_url: "https://example.atlassian.net",
+      project_ref: "SCRUM",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/projects/1/connections",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(result).toEqual(connection);
   });
 
   it("ApiError carries status, detail, and message", () => {

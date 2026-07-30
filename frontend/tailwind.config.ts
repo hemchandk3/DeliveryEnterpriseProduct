@@ -1,41 +1,48 @@
 import type { Config } from "tailwindcss";
 
-// Design tokens transcribed from docs/ux/ux-spec.md §3 "Cross-cutting design
-// system & tokens" (Figma variable collection `tokens`, 23 variables).
-// Status colors use the UX-spec's *corrected* contrast values directly
-// (§9 consolidated accessibility pass) rather than the originally-designed
-// values, since the fixes are non-negotiable per the spec:
-//   - status-green text is #166534 (not #15803D -- the on-#DCFCE7 subtitle
-//     fix, ~5.2:1) so a single token is safe on both heading and subtitle use.
-//   - text-muted is #64748B (not #94A3B8, which is reserved for on-dark
-//     surfaces only per the spec).
+// Design tokens as CSS custom properties (see src/index.css for the light
+// and `prefers-color-scheme: dark` value sets), following the shadcn/ui
+// convention of `rgb(var(--token) / <alpha-value>)` so every semantic color
+// name below picks up the active theme automatically -- no component ever
+// hardcodes a hex value or a raw Tailwind gray. This is what makes
+// light/dark a token-layer change, not a per-component rewrite.
+//
+// Palette shape: neutral surfaces + one accent (indigo) + semantic risk
+// colors (green/amber/red) + info -- restrained on purpose (coordinator
+// scope-change: "modern 2026-era design language ... restrained color").
 export default {
   darkMode: "media",
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
   theme: {
     extend: {
       colors: {
-        canvas: "#EEF2F6",
-        surface: "#FFFFFF",
-        subtle: "#F8FAFC",
-        sidebar: "#0F172A",
-        "text-primary": "#0F172A",
-        "text-secondary": "#475569",
-        "text-muted": "#64748B",
+        canvas: "rgb(var(--color-canvas) / <alpha-value>)",
+        surface: "rgb(var(--color-surface) / <alpha-value>)",
+        subtle: "rgb(var(--color-subtle) / <alpha-value>)",
+        skeleton: "rgb(var(--color-skeleton) / <alpha-value>)",
+        border: "rgb(var(--color-border) / <alpha-value>)",
+        accent: "rgb(var(--color-accent) / <alpha-value>)",
+        sidebar: "#0F172A", // persistent dark nav rail -- constant across themes by design
+        "text-primary": "rgb(var(--color-text-primary) / <alpha-value>)",
+        "text-secondary": "rgb(var(--color-text-secondary) / <alpha-value>)",
+        "text-muted": "rgb(var(--color-text-muted) / <alpha-value>)",
         status: {
-          green: "#166534",
-          "green-bg": "#DCFCE7",
-          "green-border": "#86EFAC",
-          red: "#B91C1C",
-          "red-bg": "#FEE2E2",
-          "red-border": "#FCA5A5",
-          amber: "#B45309",
-          "amber-bg": "#FEF3C7",
-          "amber-border": "#FDE68A",
-          info: "#1D4ED8",
-          "info-bg": "#DBEAFE",
-          "info-border": "#BFDBFE",
+          green: "rgb(var(--status-green-text) / <alpha-value>)",
+          "green-bg": "rgb(var(--status-green-bg) / <alpha-value>)",
+          "green-border": "rgb(var(--status-green-border) / <alpha-value>)",
+          red: "rgb(var(--status-red-text) / <alpha-value>)",
+          "red-bg": "rgb(var(--status-red-bg) / <alpha-value>)",
+          "red-border": "rgb(var(--status-red-border) / <alpha-value>)",
+          amber: "rgb(var(--status-amber-text) / <alpha-value>)",
+          "amber-bg": "rgb(var(--status-amber-bg) / <alpha-value>)",
+          "amber-border": "rgb(var(--status-amber-border) / <alpha-value>)",
+          info: "rgb(var(--status-info-text) / <alpha-value>)",
+          "info-bg": "rgb(var(--status-info-bg) / <alpha-value>)",
+          "info-border": "rgb(var(--status-info-border) / <alpha-value>)",
         },
+      },
+      borderRadius: {
+        DEFAULT: "0.5rem",
       },
       fontFamily: {
         sans: [

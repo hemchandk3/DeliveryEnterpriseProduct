@@ -15,11 +15,12 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default: "bg-sidebar text-white hover:bg-slate-800",
+        accent: "bg-accent text-white hover:bg-accent/90",
         destructive: "bg-status-red text-white hover:bg-red-800",
         outline:
-          "border border-slate-300 bg-surface text-text-primary hover:bg-subtle",
+          "border border-border bg-surface text-text-primary hover:bg-subtle",
         ghost: "text-text-primary hover:bg-subtle",
-        link: "text-status-info underline-offset-4 hover:underline p-0 min-h-0",
+        link: "text-accent underline-offset-4 hover:underline p-0 min-h-0",
       },
       size: {
         default: "h-9 px-4 py-2",

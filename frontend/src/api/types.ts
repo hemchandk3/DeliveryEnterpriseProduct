@@ -45,6 +45,56 @@ export interface SprintHealth {
   factors: HealthFactor[];
 }
 
+/**
+ * Per-project latest computed sprint health, as embedded on `Project` by
+ * `GET /projects` (ARCHITECTURE.md §5.7 `ProjectHealthSnapshot`, exposed via
+ * §5.6 `GET /projects`). This is what lets the UI go straight from "which
+ * project" to "which sprint" without a separate sprint picker -- there is
+ * exactly one current snapshot per project in the MVP loop-runner model.
+ */
+export interface ProjectHealthSummary {
+  sprint_external_id: string;
+  status: SprintHealthStatus;
+  score: number;
+  computed_at: string;
+}
+
+/**
+ * `GET /projects` row (ARCHITECTURE.md §5.6/§13.7, tech doc
+ * multi-tenancy-and-project-grain.html §4). Tenant scoping is enforced
+ * server-side from the JWT's `org_id` -- every id on this type is already
+ * scoped to the caller's tenant; the frontend never accepts or sends an
+ * org id itself (ADR-006).
+ */
+export interface Project {
+  id: number;
+  key: string;
+  name: string;
+  latest_health: ProjectHealthSummary | null;
+}
+
+export interface ProjectListResponse {
+  items: Project[];
+  next_cursor: string | null;
+}
+
+// TODO(SCRUM-19): connections management (list/edit/test/delete existing
+// connections) is its own ticket and its own UI, out of SCRUM-16 scope.
+// These two types + the create-project/create-connection calls in
+// client.ts exist so the dashboard's "Connect a project" entry point is a
+// real, typed call against the documented contract (ARCHITECTURE.md §5.6
+// `POST /projects`, `POST /projects/{id}/connections`) rather than a dead
+// button -- see ConnectProjectDialog.tsx.
+export type ConnectionSourceType = "jira" | "github" | "demo";
+
+export interface Connection {
+  id: number;
+  project_id: number;
+  source_type: ConnectionSourceType;
+  display_name: string;
+  enabled: boolean;
+}
+
 export interface EvidenceRef {
   signal_id: number;
   kind: string;

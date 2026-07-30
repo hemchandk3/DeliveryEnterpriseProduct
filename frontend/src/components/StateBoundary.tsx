@@ -18,6 +18,8 @@ interface StateBoundaryProps {
   isEmpty?: boolean;
   emptyTitle?: string;
   emptyDescription?: string;
+  /** Optional call-to-action rendered under the empty-state description (e.g. "Connect a project"). */
+  emptyAction?: ReactNode;
   children: ReactNode;
 }
 
@@ -33,6 +35,7 @@ export function StateBoundary({
   isEmpty = false,
   emptyTitle = "Nothing here yet",
   emptyDescription = "There's no data to show right now.",
+  emptyAction,
   children,
 }: StateBoundaryProps) {
   if (state.isLoading) {
@@ -63,12 +66,13 @@ export function StateBoundary({
 
   if (isEmpty) {
     return (
-      <div className="flex flex-col items-start gap-2 rounded-lg border border-slate-200 bg-subtle p-4 text-text-secondary">
+      <div className="flex flex-col items-start gap-3 rounded-lg border border-border bg-subtle p-4 text-text-secondary">
         <div className="flex items-center gap-2 font-semibold text-text-primary">
           <Inbox className="h-5 w-5" aria-hidden="true" />
           <span>{emptyTitle}</span>
         </div>
         <p className="text-sm">{emptyDescription}</p>
+        {emptyAction}
       </div>
     );
   }

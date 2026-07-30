@@ -75,6 +75,21 @@ describe("StateBoundary", () => {
     expect(screen.queryByText("content")).not.toBeInTheDocument();
   });
 
+  it("renders the optional emptyAction (e.g. a Connect CTA) under the empty-state description", () => {
+    render(
+      <StateBoundary
+        state={{ isLoading: false, isError: false, error: null, refetch: vi.fn() }}
+        loadingFallback={<p>loading</p>}
+        isEmpty
+        emptyAction={<button type="button">Connect a project</button>}
+      >
+        <p>content</p>
+      </StateBoundary>
+    );
+
+    expect(screen.getByRole("button", { name: /connect a project/i })).toBeInTheDocument();
+  });
+
   it("renders children on success", () => {
     render(
       <StateBoundary

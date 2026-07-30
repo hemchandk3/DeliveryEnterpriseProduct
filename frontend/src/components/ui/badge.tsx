@@ -14,7 +14,7 @@ const badgeVariants = cva(
         red: "bg-status-red-bg text-status-red border-status-red-border",
         amber: "bg-status-amber-bg text-status-amber border-status-amber-border",
         info: "bg-status-info-bg text-status-info border-status-info-border",
-        neutral: "bg-subtle text-text-secondary border-slate-200",
+        neutral: "bg-subtle text-text-secondary border-border",
       },
     },
     defaultVariants: { variant: "neutral" },
